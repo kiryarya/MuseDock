@@ -1,7 +1,7 @@
 ﻿using System.IO;
-using PaneNest.Desktop.Models;
+using MuseDock.Desktop.Models;
 
-namespace PaneNest.Desktop.Services;
+namespace MuseDock.Desktop.Services;
 
 public sealed class AssetLibraryService
 {

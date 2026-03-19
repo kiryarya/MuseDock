@@ -1,4 +1,4 @@
-﻿namespace PaneNest.Desktop.Models;
+﻿namespace MuseDock.Desktop.Models;
 
 public sealed class AssetMetadata
 {

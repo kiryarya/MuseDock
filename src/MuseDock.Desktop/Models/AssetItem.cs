@@ -2,7 +2,7 @@
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 
-namespace PaneNest.Desktop.Models;
+namespace MuseDock.Desktop.Models;
 
 public sealed class AssetItem : INotifyPropertyChanged
 {

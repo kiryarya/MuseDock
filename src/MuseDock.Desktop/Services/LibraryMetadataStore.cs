@@ -2,9 +2,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using PaneNest.Desktop.Models;
+using MuseDock.Desktop.Models;
 
-namespace PaneNest.Desktop.Services;
+namespace MuseDock.Desktop.Services;
 
 public sealed class LibraryMetadataStore
 {
@@ -42,7 +42,7 @@ public sealed class LibraryMetadataStore
     {
         var appData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PaneNest");
+            "MuseDock");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(libraryPath)));
         return Path.Combine(appData, $"{hash}.json");
     }

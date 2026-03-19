@@ -3,7 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace PaneNest.Desktop.Models;
+namespace MuseDock.Desktop.Models;
 
 public sealed class WorkspacePaneState : INotifyPropertyChanged
 {

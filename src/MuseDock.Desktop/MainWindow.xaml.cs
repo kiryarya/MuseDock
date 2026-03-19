@@ -10,12 +10,12 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using PaneNest.Desktop.Models;
-using PaneNest.Desktop.Services;
+using MuseDock.Desktop.Models;
+using MuseDock.Desktop.Services;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.FileIO;
 
-namespace PaneNest.Desktop;
+namespace MuseDock.Desktop;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
@@ -1857,7 +1857,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ShowError(string message, Exception exception)
     {
         AddLog($"{message} {exception.Message}");
-        MessageBox.Show($"{message}\n{exception.Message}", "PaneNest", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show($"{message}\n{exception.Message}", "MuseDock", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private static bool IsInteractiveElement(DependencyObject? origin)

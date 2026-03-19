@@ -4,10 +4,10 @@ setlocal
 set ROOT=%~dp0..
 set DOTNET_CLI_HOME=%ROOT%\.dotnet-home
 set NUGET_PACKAGES=%ROOT%\.nuget
-set PROJECT=%ROOT%\src\PaneNest.Desktop\PaneNest.Desktop.csproj
-set PROJECT_OBJ=%ROOT%\src\PaneNest.Desktop\obj
+set PROJECT=%ROOT%\src\MuseDock.Desktop\MuseDock.Desktop.csproj
+set PROJECT_OBJ=%ROOT%\src\MuseDock.Desktop\obj
 set DIST_ROOT=%ROOT%\dist
-set DIST_OUT=%DIST_ROOT%\PaneNest-win-x64
+set DIST_OUT=%DIST_ROOT%\MuseDock-win-x64
 
 if not exist "%DOTNET_CLI_HOME%" mkdir "%DOTNET_CLI_HOME%"
 if not exist "%NUGET_PACKAGES%" mkdir "%NUGET_PACKAGES%"
@@ -29,5 +29,5 @@ dotnet publish "%PROJECT%" -c Release -r win-x64 --self-contained true --no-rest
 if errorlevel 1 exit /b 1
 
 echo.
-echo Ready: %DIST_OUT%\PaneNest.Desktop.exe
+echo Ready: %DIST_OUT%\MuseDock.Desktop.exe
 endlocal
