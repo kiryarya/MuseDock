@@ -4,7 +4,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Data;
 
-namespace FilePilot.Desktop.Models;
+namespace PaneNest.Desktop.Models;
 
 public sealed class ExplorerTabState : INotifyPropertyChanged
 {

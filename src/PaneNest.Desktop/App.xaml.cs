@@ -1,14 +1,14 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using System.Windows.Threading;
 
-namespace FilePilot.Desktop;
+namespace PaneNest.Desktop;
 
 public partial class App : System.Windows.Application
 {
     private static readonly string LogDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "FilePilot",
+        "PaneNest",
         "logs");
 
     protected override void OnStartup(System.Windows.StartupEventArgs e)
@@ -42,7 +42,7 @@ public partial class App : System.Windows.Application
         WriteErrorLog("UI スレッドで未処理例外が発生しました。", e.Exception);
         System.Windows.MessageBox.Show(
             $"アプリ実行中にエラーが発生しました。\n\n{e.Exception.Message}\n\nログ: {GetLatestLogPath()}",
-            "File Pilot",
+            "PaneNest",
             System.Windows.MessageBoxButton.OK,
             System.Windows.MessageBoxImage.Error);
         e.Handled = true;
@@ -68,7 +68,7 @@ public partial class App : System.Windows.Application
         WriteErrorLog(message, exception);
         System.Windows.MessageBox.Show(
             $"{message}\n\n{exception.Message}\n\nログ: {GetLatestLogPath()}",
-            "File Pilot",
+            "PaneNest",
             System.Windows.MessageBoxButton.OK,
             System.Windows.MessageBoxImage.Error);
         Shutdown(-1);

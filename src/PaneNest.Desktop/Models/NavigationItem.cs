@@ -1,4 +1,4 @@
-namespace FilePilot.Desktop.Models;
+﻿namespace PaneNest.Desktop.Models;
 
 public sealed class NavigationItem
 {

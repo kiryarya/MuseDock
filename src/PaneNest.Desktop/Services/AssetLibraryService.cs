@@ -1,7 +1,7 @@
-using System.IO;
-using FilePilot.Desktop.Models;
+﻿using System.IO;
+using PaneNest.Desktop.Models;
 
-namespace FilePilot.Desktop.Services;
+namespace PaneNest.Desktop.Services;
 
 public sealed class AssetLibraryService
 {

@@ -1,11 +1,11 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName WindowsBase
 
 $root = Split-Path -Parent $PSScriptRoot
-$assetsDir = Join-Path $root "src\FilePilot.Desktop\Assets"
+$assetsDir = Join-Path $root "src\PaneNest.Desktop\Assets"
 $pngPath = Join-Path $assetsDir "AppIcon.png"
 $icoPath = Join-Path $assetsDir "AppIcon.ico"
 

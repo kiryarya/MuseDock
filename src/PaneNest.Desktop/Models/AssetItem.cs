@@ -1,8 +1,8 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 
-namespace FilePilot.Desktop.Models;
+namespace PaneNest.Desktop.Models;
 
 public sealed class AssetItem : INotifyPropertyChanged
 {

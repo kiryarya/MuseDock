@@ -1,10 +1,10 @@
-using System.IO;
+﻿using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using FilePilot.Desktop.Models;
+using PaneNest.Desktop.Models;
 
-namespace FilePilot.Desktop.Services;
+namespace PaneNest.Desktop.Services;
 
 public sealed class LibraryMetadataStore
 {
@@ -42,7 +42,7 @@ public sealed class LibraryMetadataStore
     {
         var appData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "FilePilot");
+            "PaneNest");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(libraryPath)));
         return Path.Combine(appData, $"{hash}.json");
     }

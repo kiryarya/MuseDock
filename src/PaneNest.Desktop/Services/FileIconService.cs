@@ -1,11 +1,11 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-namespace FilePilot.Desktop.Services;
+namespace PaneNest.Desktop.Services;
 
 internal static class FileIconService
 {

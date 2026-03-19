@@ -1,9 +1,9 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace FilePilot.Desktop.Models;
+namespace PaneNest.Desktop.Models;
 
 public sealed class WorkspacePaneState : INotifyPropertyChanged
 {

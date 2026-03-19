@@ -1,14 +1,14 @@
-<Window x:Class="FilePilot.Desktop.MainWindow"
+﻿<Window x:Class="PaneNest.Desktop.MainWindow"
         x:Name="RootWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:FilePilot.Desktop"
-        xmlns:models="clr-namespace:FilePilot.Desktop.Models"
+        xmlns:local="clr-namespace:PaneNest.Desktop"
+        xmlns:models="clr-namespace:PaneNest.Desktop.Models"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         mc:Ignorable="d"
-        Title="File Pilot"
+        Title="PaneNest"
         Width="1540"
         Height="940"
         MinWidth="1280"
@@ -947,7 +947,7 @@
                    VerticalAlignment="Center"
                    FontSize="14"
                    FontWeight="SemiBold"
-                   Text="File Pilot" />
+                   Text="PaneNest" />
 
         <StackPanel Grid.Column="2"
                     Margin="18,0,14,0"

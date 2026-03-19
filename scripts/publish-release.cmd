@@ -1,12 +1,13 @@
-@echo off
+﻿@echo off
 setlocal
 
 set ROOT=%~dp0..
 set DOTNET_CLI_HOME=%ROOT%\.dotnet-home
 set NUGET_PACKAGES=%ROOT%\.nuget
-set PROJECT=%ROOT%\src\FilePilot.Desktop\FilePilot.Desktop.csproj
+set PROJECT=%ROOT%\src\PaneNest.Desktop\PaneNest.Desktop.csproj
+set PROJECT_OBJ=%ROOT%\src\PaneNest.Desktop\obj
 set DIST_ROOT=%ROOT%\dist
-set DIST_OUT=%DIST_ROOT%\FilePilot-win-x64
+set DIST_OUT=%DIST_ROOT%\PaneNest-win-x64
 
 if not exist "%DOTNET_CLI_HOME%" mkdir "%DOTNET_CLI_HOME%"
 if not exist "%NUGET_PACKAGES%" mkdir "%NUGET_PACKAGES%"
@@ -19,10 +20,14 @@ if exist "%DIST_ROOT%\self-contained-toolbar-fix" rmdir /s /q "%DIST_ROOT%\self-
 if exist "%DIST_ROOT%\self-contained-contrast-fix" rmdir /s /q "%DIST_ROOT%\self-contained-contrast-fix"
 if exist "%DIST_ROOT%\self-contained-contrast-fix-2" rmdir /s /q "%DIST_ROOT%\self-contained-contrast-fix-2"
 if exist "%DIST_ROOT%\win-x64" rmdir /s /q "%DIST_ROOT%\win-x64"
+if exist "%PROJECT_OBJ%" rmdir /s /q "%PROJECT_OBJ%"
 
-dotnet publish "%PROJECT%" -c Release -r win-x64 --self-contained true -o "%DIST_OUT%"
+dotnet restore "%PROJECT%" -r win-x64
+if errorlevel 1 exit /b 1
+
+dotnet publish "%PROJECT%" -c Release -r win-x64 --self-contained true --no-restore -o "%DIST_OUT%"
 if errorlevel 1 exit /b 1
 
 echo.
-echo Ready: %DIST_OUT%\FilePilot.Desktop.exe
+echo Ready: %DIST_OUT%\PaneNest.Desktop.exe
 endlocal
