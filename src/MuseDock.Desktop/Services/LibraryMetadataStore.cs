@@ -22,7 +22,8 @@ public sealed class LibraryMetadataStore
         }
 
         await using var stream = File.OpenRead(metadataPath);
-        var document = await JsonSerializer.DeserializeAsync<LibraryMetadataDocument>(stream, JsonOptions, cancellationToken);
+        var document = await JsonSerializer.DeserializeAsync<LibraryMetadataDocument>(stream, JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
         return document ?? new LibraryMetadataDocument();
     }
 
@@ -35,7 +36,17 @@ public sealed class LibraryMetadataStore
         Directory.CreateDirectory(Path.GetDirectoryName(metadataPath)!);
 
         await using var stream = File.Create(metadataPath);
-        await JsonSerializer.SerializeAsync(stream, document, JsonOptions, cancellationToken);
+        await JsonSerializer.SerializeAsync(stream, document, JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public void Save(string libraryPath, LibraryMetadataDocument document)
+    {
+        var metadataPath = GetMetadataPath(libraryPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(metadataPath)!);
+
+        using var stream = File.Create(metadataPath);
+        JsonSerializer.Serialize(stream, document, JsonOptions);
     }
 
     private static string GetMetadataPath(string libraryPath)

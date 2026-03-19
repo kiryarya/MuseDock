@@ -14,4 +14,11 @@
   <ItemGroup>
     <Resource Include="Assets\AppIcon.ico" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Plugins\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

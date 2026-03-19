@@ -14,6 +14,7 @@
         MinWidth="1280"
         MinHeight="820"
         Loaded="Window_Loaded"
+        Closing="Window_Closing"
         Icon="pack://application:,,,/Assets/AppIcon.ico"
         Background="#0C0F13"
         Foreground="#F2F5F7"
@@ -29,7 +30,6 @@
 
   <Window.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
-    <local:SubtractDoubleConverter x:Key="SubtractDoubleConverter" />
 
     <SolidColorBrush x:Key="Brush.Window" Color="#0C0F13" />
     <SolidColorBrush x:Key="Brush.Surface" Color="#131920" />
@@ -714,6 +714,7 @@
 
     <DataTemplate x:Key="WorkspaceTabContentTemplate" DataType="{x:Type models:ExplorerTabState}">
       <Grid Background="Transparent"
+            MinHeight="0"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch">
         <Grid.RowDefinitions>
@@ -766,10 +767,14 @@
         </Border>
 
         <DataGrid Grid.Row="1"
+                  MinHeight="0"
                   Margin="12,8,12,12"
                   ItemsSource="{Binding AssetsView}"
                   SelectedItem="{Binding SelectedAsset, Mode=TwoWay}"
+                  IsReadOnly="True"
                   CanUserResizeColumns="True"
+                  Loaded="AssetGrid_Loaded"
+                  Unloaded="AssetGrid_Unloaded"
                   ScrollViewer.PanningMode="Both"
                   ScrollViewer.VerticalScrollBarVisibility="Visible"
                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
@@ -834,22 +839,22 @@
             <DataGridTextColumn Header="種類"
                                 Width="120"
                                 MinWidth="90"
-                                Binding="{Binding KindLabel}" />
+                                Binding="{Binding KindLabel, Mode=OneWay}" />
             <DataGridTextColumn Header="更新日時"
                                 Width="180"
                                 MinWidth="140"
-                                Binding="{Binding ModifiedDisplay}" />
+                                Binding="{Binding ModifiedDisplay, Mode=OneWay}" />
             <DataGridTextColumn Header="サイズ"
                                 Width="120"
                                 MinWidth="90"
-                                Binding="{Binding SizeDisplay}" />
+                                Binding="{Binding SizeDisplay, Mode=OneWay}" />
             <DataGridTextColumn Header="タグ"
                                 Width="220"
                                 MinWidth="120"
-                                Binding="{Binding TagsDisplay}" />
+                                Binding="{Binding TagsDisplay, Mode=OneWay}" />
             <DataGridTextColumn Header="★"
                                 Width="60"
-                                Binding="{Binding FavoriteMark}" />
+                                Binding="{Binding FavoriteMark, Mode=OneWay}" />
           </DataGrid.Columns>
         </DataGrid>
       </Grid>
@@ -857,15 +862,20 @@
 
     <DataTemplate x:Key="WorkspacePaneTemplate" DataType="{x:Type models:WorkspacePaneState}">
       <Border Background="{StaticResource Brush.SurfaceAlt}"
+              MinHeight="0"
               PreviewMouseLeftButtonDown="WorkspacePane_MouseDown"
               AllowDrop="True"
               PreviewDragEnter="WorkspacePane_DragEnter"
               PreviewDragOver="WorkspacePane_DragOver"
               PreviewDragLeave="WorkspacePane_DragLeave"
               PreviewDrop="WorkspacePane_Drop">
-        <Grid>
-          <DockPanel LastChildFill="True">
-            <ListBox DockPanel.Dock="Top"
+        <Grid MinHeight="0">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+
+          <ListBox Grid.Row="0"
                    Margin="10,10,10,0"
                    ItemsSource="{Binding Tabs}"
                    SelectedItem="{Binding SelectedTab, Mode=TwoWay}"
@@ -880,38 +890,16 @@
                 <StackPanel Orientation="Horizontal" />
               </ItemsPanelTemplate>
             </ListBox.ItemsPanel>
-            </ListBox>
+          </ListBox>
 
-            <ContentControl
+          <ContentControl Grid.Row="1"
                           Margin="0,8,0,0"
-                          Height="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=ActualHeight, Converter={StaticResource SubtractDoubleConverter}, ConverterParameter=290}"
+                          MinHeight="0"
                           HorizontalContentAlignment="Stretch"
                           VerticalContentAlignment="Stretch"
                           Content="{Binding SelectedTab}"
                           ContentTemplate="{StaticResource WorkspaceTabContentTemplate}" />
-          </DockPanel>
 
-          <Border Margin="18"
-                  Background="#CC0F151C"
-                  BorderBrush="{StaticResource Brush.Accent}"
-                  BorderThickness="1"
-                  CornerRadius="14">
-            <Border.Style>
-              <Style TargetType="Border">
-                <Setter Property="Visibility" Value="Collapsed" />
-                <Style.Triggers>
-                  <DataTrigger Binding="{Binding IsDropActive}" Value="True">
-                    <Setter Property="Visibility" Value="Visible" />
-                  </DataTrigger>
-                </Style.Triggers>
-              </Style>
-            </Border.Style>
-            <TextBlock HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       FontSize="16"
-                       FontWeight="SemiBold"
-                       Text="{Binding DropHintText}" />
-          </Border>
         </Grid>
       </Border>
     </DataTemplate>
@@ -931,6 +919,7 @@
       <Grid Margin="12,8,12,8"
             MouseLeftButtonDown="Toolbar_MouseLeftButtonDown">
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
@@ -974,7 +963,12 @@
                   Content="✎" />
         </StackPanel>
 
-        <Grid Grid.Column="3">
+        <Button Grid.Column="3"
+                Margin="0,0,14,0"
+                Click="OpenSettings_Click"
+                Content="設定" />
+
+        <Grid Grid.Column="4">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
@@ -995,7 +989,7 @@
                      Text="{Binding SelectedTab.StatusText}" />
         </Grid>
 
-        <StackPanel Grid.Column="4"
+        <StackPanel Grid.Column="5"
                     Margin="14,0,0,0"
                     Orientation="Horizontal"
                     VerticalAlignment="Center">
@@ -1012,7 +1006,8 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="1">
+    <Grid Grid.Row="1"
+          MinHeight="0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="250" />
         <ColumnDefinition Width="1" />
@@ -1025,6 +1020,7 @@
             Background="{StaticResource Brush.Surface}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -1033,13 +1029,110 @@
                 BorderThickness="0,0,0,1">
           <StackPanel>
             <TextBlock Style="{StaticResource SectionLabel}"
-                       Text="ディレクトリ" />
+                       Text="クイックアクセスとディレクトリ" />
             <TextBlock Style="{StaticResource SectionDescription}"
-                       Text="左側のツリーからフォルダーを選択します。" />
+                       Text="グループ登録したフォルダーや左側のツリーからすぐ開けます。" />
           </StackPanel>
         </Border>
 
-        <TreeView Grid.Row="1"
+        <Border Grid.Row="1"
+                Padding="10,10,10,8"
+                BorderBrush="{StaticResource Brush.Border}"
+                BorderThickness="0,0,0,1">
+          <StackPanel>
+            <Grid Margin="0,0,0,8">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+
+              <Button Grid.Column="0"
+                      Padding="10,4"
+                      Click="AddQuickAccessGroup_Click"
+                      Content="+ グループ" />
+              <ComboBox Grid.Column="1"
+                        Margin="8,0"
+                        ItemsSource="{Binding QuickAccessGroups}"
+                        DisplayMemberPath="Name"
+                        SelectedItem="{Binding SelectedQuickAccessGroup, Mode=TwoWay}" />
+              <Button Grid.Column="2"
+                      Padding="10,4"
+                      Click="AddCurrentFolderToQuickAccess_Click"
+                      Content="+ 選択フォルダー" />
+            </Grid>
+
+            <ItemsControl ItemsSource="{Binding QuickAccessGroups}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type models:QuickAccessGroup}">
+                  <Border Margin="0,0,0,8"
+                          Padding="8"
+                          Background="{StaticResource Brush.SurfaceAlt}"
+                          BorderBrush="{StaticResource Brush.Border}"
+                          BorderThickness="1"
+                          CornerRadius="8">
+                    <StackPanel>
+                      <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="Auto" />
+                          <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                          <TextBlock FontWeight="SemiBold"
+                                     Text="{Binding Name}" />
+                          <TextBlock FontSize="11"
+                                     Foreground="{StaticResource Brush.TextMuted}"
+                                     Text="{Binding FolderCount, StringFormat=登録フォルダー {0} 件}" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Margin="8,0,0,0"
+                                Padding="8,2"
+                                Tag="{Binding}"
+                                Click="RenameQuickAccessGroup_Click"
+                                Content="名前変更" />
+                        <Button Grid.Column="2"
+                                Margin="6,0,0,0"
+                                Padding="8,2"
+                                Tag="{Binding}"
+                                Click="DeleteQuickAccessGroup_Click"
+                                Content="削除" />
+                      </Grid>
+
+                      <ItemsControl ItemsSource="{Binding Folders}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate DataType="{x:Type models:QuickAccessFolder}">
+                            <Grid Margin="0,0,0,4">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                              </Grid.ColumnDefinitions>
+                              <Button Grid.Column="0"
+                                      HorizontalContentAlignment="Left"
+                                      Tag="{Binding}"
+                                      Click="OpenQuickAccessFolder_Click"
+                                      Content="{Binding Label}"
+                                      ToolTip="{Binding Path}" />
+                              <Button Grid.Column="1"
+                                      Margin="6,0,0,0"
+                                      Padding="8,2"
+                                      CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      Tag="{Binding}"
+                                      Click="RemoveQuickAccessFolder_Click"
+                                      Content="×" />
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <TreeView Grid.Row="2"
                   Margin="8"
                   ItemsSource="{Binding DirectoryRoots}"
                   SelectedItemChanged="DirectoryTree_SelectedItemChanged" />
@@ -1049,9 +1142,9 @@
               Background="{StaticResource Brush.Border}" />
 
       <Grid Grid.Column="2"
+            MinHeight="0"
             Background="{StaticResource Brush.SurfaceAlt}">
         <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
@@ -1077,64 +1170,263 @@
         </Border>
 
         <Grid Grid.Row="1"
+              MinHeight="0"
               Margin="12,10,12,12">
           <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="WorkspaceCenterLeftColumn"
+            <ColumnDefinition x:Name="WorkspaceColumn0"
                               Width="*" />
-            <ColumnDefinition x:Name="WorkspaceCenterDividerColumn"
+            <ColumnDefinition x:Name="WorkspaceDividerColumn01"
                               Width="0" />
-            <ColumnDefinition x:Name="WorkspaceCenterRightColumn"
+            <ColumnDefinition x:Name="WorkspaceColumn1"
+                              Width="0" />
+            <ColumnDefinition x:Name="WorkspaceDividerColumn12"
+                              Width="0" />
+            <ColumnDefinition x:Name="WorkspaceColumn2"
                               Width="0" />
           </Grid.ColumnDefinitions>
           <Grid.RowDefinitions>
-            <RowDefinition x:Name="WorkspaceCenterTopRow"
+            <RowDefinition x:Name="WorkspaceRow0"
                            Height="*" />
-            <RowDefinition x:Name="WorkspaceCenterDividerRow"
+            <RowDefinition x:Name="WorkspaceDividerRow01"
                            Height="0" />
-            <RowDefinition x:Name="WorkspaceCenterBottomRow"
+            <RowDefinition x:Name="WorkspaceRow1"
+                           Height="0" />
+            <RowDefinition x:Name="WorkspaceDividerRow12"
+                           Height="0" />
+            <RowDefinition x:Name="WorkspaceRow2"
                            Height="0" />
           </Grid.RowDefinitions>
 
           <ContentControl x:Name="WorkspacePane0Host"
                           Grid.Row="0"
                           Grid.Column="0"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
                           Content="{Binding Workspace0}"
                           ContentTemplate="{StaticResource WorkspacePaneTemplate}" />
 
-          <Border x:Name="WorkspaceVerticalDivider"
+          <Border x:Name="WorkspaceVerticalDivider01"
                   Grid.Row="0"
-                  Grid.RowSpan="3"
+                  Grid.RowSpan="5"
                   Grid.Column="1"
                   Background="{StaticResource Brush.Border}"
                   Visibility="Collapsed" />
 
-          <Border x:Name="WorkspaceHorizontalDivider"
+          <Border x:Name="WorkspaceVerticalDivider12"
+                  Grid.Row="0"
+                  Grid.RowSpan="5"
+                  Grid.Column="3"
+                  Background="{StaticResource Brush.Border}"
+                  Visibility="Collapsed" />
+
+          <Border x:Name="WorkspaceHorizontalDivider01"
                   Grid.Row="1"
                   Grid.Column="0"
-                  Grid.ColumnSpan="3"
+                  Grid.ColumnSpan="5"
                   Background="{StaticResource Brush.Border}"
                   Visibility="Collapsed" />
 
           <ContentControl x:Name="WorkspacePane1Host"
                           Grid.Row="0"
                           Grid.Column="2"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
                           Content="{Binding Workspace1}"
                           ContentTemplate="{StaticResource WorkspacePaneTemplate}"
                           Visibility="Collapsed" />
 
           <ContentControl x:Name="WorkspacePane2Host"
-                          Grid.Row="2"
-                          Grid.Column="0"
+                          Grid.Row="0"
+                          Grid.Column="4"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
                           Content="{Binding Workspace2}"
                           ContentTemplate="{StaticResource WorkspacePaneTemplate}"
                           Visibility="Collapsed" />
 
           <ContentControl x:Name="WorkspacePane3Host"
                           Grid.Row="2"
-                          Grid.Column="2"
+                          Grid.Column="0"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
                           Content="{Binding Workspace3}"
                           ContentTemplate="{StaticResource WorkspacePaneTemplate}"
                           Visibility="Collapsed" />
+
+          <ContentControl x:Name="WorkspacePane4Host"
+                          Grid.Row="2"
+                          Grid.Column="2"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          Content="{Binding Workspace4}"
+                          ContentTemplate="{StaticResource WorkspacePaneTemplate}"
+                          Visibility="Collapsed" />
+
+          <ContentControl x:Name="WorkspacePane5Host"
+                          Grid.Row="2"
+                          Grid.Column="4"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          Content="{Binding Workspace5}"
+                          ContentTemplate="{StaticResource WorkspacePaneTemplate}"
+                          Visibility="Collapsed" />
+
+          <Border x:Name="WorkspaceHorizontalDivider12"
+                  Grid.Row="3"
+                  Grid.Column="0"
+                  Grid.ColumnSpan="5"
+                  Background="{StaticResource Brush.Border}"
+                  Visibility="Collapsed" />
+
+          <ContentControl x:Name="WorkspacePane6Host"
+                          Grid.Row="4"
+                          Grid.Column="0"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          Content="{Binding Workspace6}"
+                          ContentTemplate="{StaticResource WorkspacePaneTemplate}"
+                          Visibility="Collapsed" />
+
+          <ContentControl x:Name="WorkspacePane7Host"
+                          Grid.Row="4"
+                          Grid.Column="2"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          Content="{Binding Workspace7}"
+                          ContentTemplate="{StaticResource WorkspacePaneTemplate}"
+                          Visibility="Collapsed" />
+
+          <ContentControl x:Name="WorkspacePane8Host"
+                          Grid.Row="4"
+                          Grid.Column="4"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          Content="{Binding Workspace8}"
+                          ContentTemplate="{StaticResource WorkspacePaneTemplate}"
+                          Visibility="Collapsed" />
+
+          <Border Grid.Row="0"
+                  Grid.RowSpan="5"
+                  Grid.Column="0"
+                  Grid.ColumnSpan="5"
+                  Panel.ZIndex="30"
+                  Margin="12"
+                  IsHitTestVisible="False"
+                  Background="#CC0F151C"
+                  BorderBrush="{StaticResource Brush.Accent}"
+                  BorderThickness="1"
+                  CornerRadius="14">
+            <Border.Style>
+              <Style TargetType="Border">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsWorkspaceDropOverlayVisible}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Border.Style>
+            <Grid Margin="16">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="0.25*" />
+                <RowDefinition Height="0.5*" />
+                <RowDefinition Height="0.25*" />
+              </Grid.RowDefinitions>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="0.25*" />
+                <ColumnDefinition Width="0.5*" />
+                <ColumnDefinition Width="0.25*" />
+              </Grid.ColumnDefinitions>
+
+              <Border Grid.RowSpan="3"
+                      Grid.Column="0"
+                      CornerRadius="12"
+                      Background="#66398BD1">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding WorkspaceDropOverlayKey}" Value="Left">
+                        <Setter Property="Visibility" Value="Visible" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+              </Border>
+
+              <Border Grid.RowSpan="3"
+                      Grid.Column="2"
+                      CornerRadius="12"
+                      Background="#66398BD1">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding WorkspaceDropOverlayKey}" Value="Right">
+                        <Setter Property="Visibility" Value="Visible" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+              </Border>
+
+              <Border Grid.Row="0"
+                      Grid.ColumnSpan="3"
+                      CornerRadius="12"
+                      Background="#66398BD1">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding WorkspaceDropOverlayKey}" Value="Top">
+                        <Setter Property="Visibility" Value="Visible" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+              </Border>
+
+              <Border Grid.Row="2"
+                      Grid.ColumnSpan="3"
+                      CornerRadius="12"
+                      Background="#66398BD1">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding WorkspaceDropOverlayKey}" Value="Bottom">
+                        <Setter Property="Visibility" Value="Visible" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+              </Border>
+
+              <Border Grid.Row="1"
+                      Grid.Column="1"
+                      CornerRadius="12"
+                      Background="#664C6175">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding WorkspaceDropOverlayKey}" Value="Center">
+                        <Setter Property="Visibility" Value="Visible" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+              </Border>
+
+              <TextBlock Grid.RowSpan="3"
+                         Grid.ColumnSpan="3"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         FontSize="18"
+                         FontWeight="SemiBold"
+                         Text="{Binding WorkspaceDropOverlayText}" />
+            </Grid>
+          </Border>
         </Grid>
       </Grid>
 

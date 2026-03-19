@@ -1,0 +1,61 @@
+{
+  "id": "sample.simple-image-tools",
+  "name": "サンプル: 画像かんたん編集",
+  "version": "1.0.0",
+  "description": "選択画像を簡単に加工して別名保存するサンプルです。",
+  "author": "MuseDock",
+  "commands": [
+    {
+      "id": "grayscale-copy",
+      "name": "グレースケール複製を作成",
+      "description": "選択画像をモノクロ化して同じフォルダへ保存します。",
+      "runner": "powershell",
+      "entry": "run.ps1",
+      "arguments": [
+        "{contextPath}",
+        "grayscale"
+      ],
+      "requiresSelection": true,
+      "waitForExit": true,
+      "refreshAfterRun": true,
+      "assetKinds": [
+        "image"
+      ],
+      "extensions": [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".bmp",
+        ".gif",
+        ".tif",
+        ".tiff"
+      ]
+    },
+    {
+      "id": "resize-half-copy",
+      "name": "50% 縮小複製を作成",
+      "description": "選択画像を半分のサイズにして同じフォルダへ保存します。",
+      "runner": "powershell",
+      "entry": "run.ps1",
+      "arguments": [
+        "{contextPath}",
+        "resize-half"
+      ],
+      "requiresSelection": true,
+      "waitForExit": true,
+      "refreshAfterRun": true,
+      "assetKinds": [
+        "image"
+      ],
+      "extensions": [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".bmp",
+        ".gif",
+        ".tif",
+        ".tiff"
+      ]
+    }
+  ]
+}

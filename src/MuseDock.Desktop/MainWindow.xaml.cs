@@ -10,9 +10,9 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using MuseDock.Desktop.Models;
 using MuseDock.Desktop.Services;
-using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.FileIO;
 
 namespace MuseDock.Desktop;
@@ -21,30 +21,51 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private const int WmMouseHWheel = 0x020E;
     private const double HorizontalScrollStep = 72d;
+    private static readonly ShortcutDefinition[] ShortcutDefinitions =
+    [
+        new("new_tab", "新しいタブ", "Ctrl+T"),
+        new("close_tab", "タブを閉じる", "Ctrl+W"),
+        new("back", "戻る", "Alt+Left"),
+        new("forward", "進む", "Alt+Right"),
+        new("up", "上へ", "Alt+Up"),
+        new("rename", "名前変更", "F2")
+    ];
+    private static readonly DependencyPropertyDescriptor? ColumnWidthDescriptor =
+        DependencyPropertyDescriptor.FromProperty(DataGridColumn.WidthProperty, typeof(DataGridColumn));
     private readonly AssetLibraryService _libraryService = new();
     private readonly LibraryMetadataStore _metadataStore = new();
+    private readonly PluginService _pluginService = new();
+    private readonly AppSettingsStore _appSettingsStore = new();
+    private readonly QuickAccessStore _quickAccessStore = new();
     private readonly ObservableCollection<NavigationItem> _drives = [];
     private readonly ObservableCollection<DirectoryTreeNode> _directoryRoots = [];
+    private readonly ObservableCollection<QuickAccessGroup> _quickAccessGroups = [];
     private readonly ObservableCollection<ExplorerTabState> _tabs = [];
     private readonly WorkspacePaneState[] _workspacePanes;
     private readonly ObservableCollection<string> _activityLog = [];
+    private readonly Dictionary<DataGrid, List<ColumnWidthSubscription>> _assetGridColumnSubscriptions = [];
+    private readonly HashSet<DataGrid> _columnWidthRestoreInProgress = [];
+    private readonly Dictionary<ExplorerTabState, CancellationTokenSource> _pendingMetadataSaveOperations = [];
+    private readonly List<InputBinding> _dynamicShortcutBindings = [];
+    private List<PluginCommandDefinition> _pluginCommands = [];
+    private AppSettingsDocument _appSettingsDocument = new();
+    private QuickAccessGroup? _selectedQuickAccessGroup;
     private ExplorerTabState? _selectedTab;
     private WorkspacePaneState? _selectedWorkspace;
     private DirectoryTreeNode? _selectedDirectoryNode;
     private PendingTransferOperation? _pendingTransfer;
+    private bool _isWorkspaceDropOverlayVisible;
+    private string _workspaceDropOverlayText = string.Empty;
+    private string _workspaceDropOverlayKey = string.Empty;
     private bool _suppressTreeSelection;
     private Point? _tabDragStartPoint;
     private ExplorerTabState? _dragTabCandidate;
 
     public MainWindow()
     {
-        _workspacePanes =
-        [
-            new WorkspacePaneState(0) { IsVisible = true },
-            new WorkspacePaneState(1),
-            new WorkspacePaneState(2),
-            new WorkspacePaneState(3)
-        ];
+        _workspacePanes = Enumerable.Range(0, 9)
+            .Select(index => new WorkspacePaneState(index) { IsVisible = index == 0 })
+            .ToArray();
 
         foreach (var pane in _workspacePanes)
         {
@@ -63,6 +84,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<DirectoryTreeNode> DirectoryRoots => _directoryRoots;
 
+    public ObservableCollection<QuickAccessGroup> QuickAccessGroups => _quickAccessGroups;
+
     public ObservableCollection<string> ActivityLog => _activityLog;
 
     public WorkspacePaneState Workspace0 => _workspacePanes[0];
@@ -72,6 +95,76 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public WorkspacePaneState Workspace2 => _workspacePanes[2];
 
     public WorkspacePaneState Workspace3 => _workspacePanes[3];
+
+    public WorkspacePaneState Workspace4 => _workspacePanes[4];
+
+    public WorkspacePaneState Workspace5 => _workspacePanes[5];
+
+    public WorkspacePaneState Workspace6 => _workspacePanes[6];
+
+    public WorkspacePaneState Workspace7 => _workspacePanes[7];
+
+    public WorkspacePaneState Workspace8 => _workspacePanes[8];
+
+    public QuickAccessGroup? SelectedQuickAccessGroup
+    {
+        get => _selectedQuickAccessGroup;
+        set
+        {
+            if (_selectedQuickAccessGroup == value)
+            {
+                return;
+            }
+
+            _selectedQuickAccessGroup = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool IsWorkspaceDropOverlayVisible
+    {
+        get => _isWorkspaceDropOverlayVisible;
+        set
+        {
+            if (_isWorkspaceDropOverlayVisible == value)
+            {
+                return;
+            }
+
+            _isWorkspaceDropOverlayVisible = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string WorkspaceDropOverlayText
+    {
+        get => _workspaceDropOverlayText;
+        set
+        {
+            if (_workspaceDropOverlayText == value)
+            {
+                return;
+            }
+
+            _workspaceDropOverlayText = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string WorkspaceDropOverlayKey
+    {
+        get => _workspaceDropOverlayKey;
+        set
+        {
+            if (_workspaceDropOverlayKey == value)
+            {
+                return;
+            }
+
+            _workspaceDropOverlayKey = value;
+            OnPropertyChanged();
+        }
+    }
 
     public ExplorerTabState? SelectedTab
     {
@@ -111,10 +204,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await InitializeExplorerAsync();
     }
 
+    private void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        CaptureVisibleGridColumnWidths();
+        _appSettingsStore.Save(_appSettingsDocument);
+        _quickAccessStore.Save(BuildQuickAccessDocument());
+
+        foreach (var tab in _tabs.ToArray())
+        {
+            CancelScheduledMetadataSave(tab);
+
+            if (string.IsNullOrWhiteSpace(tab.CurrentDrivePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                _metadataStore.Save(tab.CurrentDrivePath, tab.MetadataDocument);
+            }
+            catch
+            {
+                // Ignore shutdown persistence failures and allow the app to close.
+            }
+        }
+    }
+
     private async Task InitializeExplorerAsync()
     {
         try
         {
+            await LoadSettingsAsync();
+            ReloadPlugins(logSummary: true);
+            await LoadQuickAccessAsync();
             LoadDrives();
             LoadDirectoryRoots();
             AddLog("ドライブ一覧を読み込みました。");
@@ -158,8 +280,174 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _directoryRoots.Clear();
         foreach (var drive in _drives)
         {
-            _directoryRoots.Add(CreateDirectoryNode(drive.Path, drive.Label));
+        _directoryRoots.Add(CreateDirectoryNode(drive.Path, drive.Label));
         }
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        _appSettingsDocument = await _appSettingsStore.LoadAsync(CancellationToken.None);
+        EnsureDefaultShortcuts(_appSettingsDocument);
+        ApplyShortcutBindings();
+    }
+
+    private void EnsureDefaultShortcuts(AppSettingsDocument document)
+    {
+        foreach (var definition in ShortcutDefinitions)
+        {
+            if (!document.Shortcuts.ContainsKey(definition.Key))
+            {
+                document.Shortcuts[definition.Key] = definition.DefaultGesture;
+            }
+        }
+    }
+
+    private async Task PersistSettingsAsync()
+    {
+        await _appSettingsStore.SaveAsync(_appSettingsDocument, CancellationToken.None);
+    }
+
+    private void ApplyShortcutBindings()
+    {
+        foreach (var binding in _dynamicShortcutBindings)
+        {
+            InputBindings.Remove(binding);
+        }
+
+        _dynamicShortcutBindings.Clear();
+
+        foreach (var definition in ShortcutDefinitions)
+        {
+            if (!_appSettingsDocument.Shortcuts.TryGetValue(definition.Key, out var gestureText) ||
+                !TryParseKeyGesture(gestureText, out var gesture))
+            {
+                continue;
+            }
+
+            var binding = new KeyBinding(CreateShortcutCommand(definition.Key), gesture);
+            InputBindings.Add(binding);
+            _dynamicShortcutBindings.Add(binding);
+        }
+    }
+
+    private ICommand CreateShortcutCommand(string shortcutKey)
+    {
+        return new DelegateCommand(_ =>
+        {
+            switch (shortcutKey)
+            {
+                case "new_tab":
+                    NewTab_Click(this, new RoutedEventArgs());
+                    break;
+                case "close_tab":
+                    CloseSelectedTabFromShortcut();
+                    break;
+                case "back":
+                    Back_Click(this, new RoutedEventArgs());
+                    break;
+                case "forward":
+                    Forward_Click(this, new RoutedEventArgs());
+                    break;
+                case "up":
+                    Up_Click(this, new RoutedEventArgs());
+                    break;
+                case "rename":
+                    RenameSelected_Click(this, new RoutedEventArgs());
+                    break;
+            }
+        });
+    }
+
+    private async void CloseSelectedTabFromShortcut()
+    {
+        if (SelectedTab is not null)
+        {
+            await CloseTabAsync(SelectedTab);
+        }
+    }
+
+    private static bool TryParseKeyGesture(string? gestureText, out KeyGesture gesture)
+    {
+        gesture = default!;
+        if (string.IsNullOrWhiteSpace(gestureText))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (new KeyGestureConverter().ConvertFromString(gestureText) is KeyGesture parsed &&
+                parsed.Key != Key.None)
+            {
+                gesture = parsed;
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private async Task LoadQuickAccessAsync()
+    {
+        var document = await _quickAccessStore.LoadAsync(CancellationToken.None);
+        _quickAccessGroups.Clear();
+
+        foreach (var groupDocument in document.Groups)
+        {
+            if (string.IsNullOrWhiteSpace(groupDocument.Name))
+            {
+                continue;
+            }
+
+            var group = new QuickAccessGroup
+            {
+                Name = groupDocument.Name
+            };
+
+            foreach (var folderDocument in groupDocument.Folders)
+            {
+                if (string.IsNullOrWhiteSpace(folderDocument.Path))
+                {
+                    continue;
+                }
+
+                group.Folders.Add(new QuickAccessFolder
+                {
+                    Path = folderDocument.Path,
+                    Label = string.IsNullOrWhiteSpace(folderDocument.Label)
+                        ? Path.GetFileName(folderDocument.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                        : folderDocument.Label
+                });
+            }
+
+            _quickAccessGroups.Add(group);
+        }
+
+        SelectedQuickAccessGroup = _quickAccessGroups.FirstOrDefault();
+    }
+
+    private async Task PersistQuickAccessAsync()
+    {
+        await _quickAccessStore.SaveAsync(BuildQuickAccessDocument(), CancellationToken.None);
+    }
+
+    private QuickAccessDocument BuildQuickAccessDocument()
+    {
+        return new QuickAccessDocument
+        {
+            Groups = _quickAccessGroups.Select(group => new QuickAccessGroupDocument
+            {
+                Name = group.Name,
+                Folders = group.Folders.Select(folder => new QuickAccessFolderDocument
+                {
+                    Path = folder.Path,
+                    Label = folder.Label
+                }).ToList()
+            }).ToList()
+        };
     }
 
     private DirectoryTreeNode CreateDirectoryNode(string path, string label)
@@ -339,6 +627,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task CloseTabAsync(ExplorerTabState tab)
     {
+        PersistVisibleGridColumnWidths(tab);
+        await FlushMetadataSaveAsync(tab);
         tab.PropertyChanged -= Tab_PropertyChanged;
         tab.LoadCts?.Cancel();
 
@@ -388,6 +678,184 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await NavigateToPathAsync(SelectedTab, node.Path);
         }
     }
+
+    private async void AddQuickAccessGroup_Click(object sender, RoutedEventArgs e)
+    {
+        var groupName = PromptForText("クイックアクセス", "新しいグループ名を入力してください。", "よく使う");
+        if (string.IsNullOrWhiteSpace(groupName))
+        {
+            return;
+        }
+
+        if (_quickAccessGroups.Any(group => string.Equals(group.Name, groupName, StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show("同じ名前のグループが既にあります。", "MuseDock", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var group = new QuickAccessGroup
+        {
+            Name = groupName.Trim()
+        };
+
+        _quickAccessGroups.Add(group);
+        SelectedQuickAccessGroup = group;
+        await PersistQuickAccessAsync();
+        AddLog($"クイックアクセスグループ {group.Name} を追加しました。");
+    }
+
+    private async void AddCurrentFolderToQuickAccess_Click(object sender, RoutedEventArgs e)
+    {
+        var path = _selectedDirectoryNode?.Path;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = SelectedTab?.CurrentLocationPath;
+        }
+
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            AddLog("登録できるフォルダーが選択されていません。");
+            return;
+        }
+
+        var group = await EnsureQuickAccessGroupAsync();
+        if (group is null)
+        {
+            return;
+        }
+
+        if (group.Folders.Any(folder => string.Equals(folder.Path, path, StringComparison.OrdinalIgnoreCase)))
+        {
+            AddLog($"{path} は既に {group.Name} に登録されています。");
+            return;
+        }
+
+        group.Folders.Add(new QuickAccessFolder
+        {
+            Path = path,
+            Label = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) switch
+            {
+                "" => path,
+                var label => label
+            }
+        });
+
+        await PersistQuickAccessAsync();
+        AddLog($"{path} を {group.Name} に登録しました。");
+    }
+
+    private async void OpenQuickAccessFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: QuickAccessFolder folder } || !Directory.Exists(folder.Path))
+        {
+            return;
+        }
+
+        if (SelectedTab is not null)
+        {
+            await NavigateToPathAsync(SelectedTab, folder.Path);
+        }
+        else
+        {
+            await CreateAndOpenTabAsync(folder.Path);
+        }
+    }
+
+    private async void RemoveQuickAccessFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: QuickAccessFolder folder, CommandParameter: QuickAccessGroup group })
+        {
+            return;
+        }
+
+        group.Folders.Remove(folder);
+        await PersistQuickAccessAsync();
+        AddLog($"{folder.Label} を {group.Name} から外しました。");
+    }
+
+    private async void RenameQuickAccessGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: QuickAccessGroup group })
+        {
+            return;
+        }
+
+        var nextName = PromptForText("クイックアクセス", "グループ名を入力してください。", group.Name);
+        if (string.IsNullOrWhiteSpace(nextName))
+        {
+            return;
+        }
+
+        nextName = nextName.Trim();
+        if (_quickAccessGroups.Any(existing => !ReferenceEquals(existing, group) && string.Equals(existing.Name, nextName, StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show("同じ名前のグループが既にあります。", "MuseDock", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        group.Name = nextName;
+        await PersistQuickAccessAsync();
+        AddLog($"クイックアクセスグループ名を {nextName} に変更しました。");
+    }
+
+    private async void DeleteQuickAccessGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: QuickAccessGroup group })
+        {
+            return;
+        }
+
+        if (MessageBox.Show(
+                $"グループ {group.Name} を削除しますか？",
+                "MuseDock",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        _quickAccessGroups.Remove(group);
+        if (ReferenceEquals(SelectedQuickAccessGroup, group))
+        {
+            SelectedQuickAccessGroup = _quickAccessGroups.FirstOrDefault();
+        }
+
+        await PersistQuickAccessAsync();
+        AddLog($"クイックアクセスグループ {group.Name} を削除しました。");
+    }
+
+    private async Task<QuickAccessGroup?> EnsureQuickAccessGroupAsync()
+    {
+        if (SelectedQuickAccessGroup is not null)
+        {
+            return SelectedQuickAccessGroup;
+        }
+
+        var groupName = PromptForText("クイックアクセス", "登録先グループ名を入力してください。", "よく使う");
+        if (string.IsNullOrWhiteSpace(groupName))
+        {
+            return null;
+        }
+
+        var existing = _quickAccessGroups.FirstOrDefault(group =>
+            string.Equals(group.Name, groupName.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            SelectedQuickAccessGroup = existing;
+            return existing;
+        }
+
+        var group = new QuickAccessGroup
+        {
+            Name = groupName.Trim()
+        };
+
+        _quickAccessGroups.Add(group);
+        SelectedQuickAccessGroup = group;
+        await PersistQuickAccessAsync();
+        return group;
+    }
+
     private async void Back_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedTab is not { CanGoBack: true } tab)
@@ -461,6 +929,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void CloseWindow_Click(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private async void OpenSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new ShortcutSettingsWindow(ShortcutDefinitions, _appSettingsDocument.Shortcuts)
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() != true)
+        {
+            return;
+        }
+
+        _appSettingsDocument.Shortcuts = window.BuildShortcutMap();
+        EnsureDefaultShortcuts(_appSettingsDocument);
+        ApplyShortcutBindings();
+        await PersistSettingsAsync();
+        AddLog("ショートカット設定を保存しました。");
     }
 
     private void ToggleWindowState()
@@ -537,7 +1024,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        dataGrid.ContextMenu = CreateGridContextMenu();
+        dataGrid.ContextMenu = CreateGridContextMenu(tab);
+    }
+
+    private void AssetGrid_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not DataGrid dataGrid || dataGrid.DataContext is not ExplorerTabState tab)
+        {
+            return;
+        }
+
+        RegisterAssetGridColumnTracking(dataGrid, tab);
+        ApplyStoredColumnWidths(dataGrid, tab);
+    }
+
+    private void AssetGrid_Unloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is DataGrid dataGrid)
+        {
+            UnregisterAssetGridColumnTracking(dataGrid);
+        }
     }
 
     private async void OpenContextAsset_Click(object sender, RoutedEventArgs e)
@@ -637,6 +1143,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             await DeleteAssetAsync(SelectedTab, asset);
         }
+    }
+
+    private async void RunPluginCommand_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: PluginMenuContext menuContext })
+        {
+            return;
+        }
+
+        await ExecutePluginCommandAsync(menuContext);
+    }
+
+    private void ReloadPlugins_Click(object sender, RoutedEventArgs e)
+    {
+        ReloadPlugins(logSummary: true);
+    }
+
+    private void OpenPluginFolder_Click(object sender, RoutedEventArgs e)
+    {
+        Directory.CreateDirectory(_pluginService.UserPluginDirectory);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = _pluginService.UserPluginDirectory,
+            UseShellExecute = true
+        });
+
+        AddLog("プラグインフォルダーを開きました。");
     }
 
     private async void AddTag_Click(object sender, RoutedEventArgs e)
@@ -770,6 +1303,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             tab.UpdateTitle();
 
             tab.MetadataDocument = await GetMetadataDocumentForRootAsync(tab.CurrentDrivePath, cancellationToken);
+            await Dispatcher.InvokeAsync(() => ApplyStoredColumnWidthsToVisibleGrids(tab), DispatcherPriority.Loaded, cancellationToken);
             var entries = await _libraryService.GetDirectoryEntriesAsync(tab.CurrentDrivePath, directoryPath, tab.MetadataDocument.Items, cancellationToken);
 
             tab.Assets.Clear();
@@ -907,7 +1441,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RenameAssetAsync(ExplorerTabState tab, AssetItem asset)
     {
-        var nextName = Interaction.InputBox("新しい名前を入力してください。", "名前変更", asset.Name);
+        var nextName = PromptForText("名前変更", "新しい名前を入力してください。", asset.Name);
         if (string.IsNullOrWhiteSpace(nextName) || string.Equals(nextName, asset.Name, StringComparison.Ordinal))
         {
             return;
@@ -1109,8 +1643,191 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (!string.IsNullOrWhiteSpace(tab.CurrentDrivePath))
         {
-            await _metadataStore.SaveAsync(tab.CurrentDrivePath, tab.MetadataDocument, CancellationToken.None);
+            await _metadataStore.SaveAsync(tab.CurrentDrivePath, tab.MetadataDocument, CancellationToken.None)
+                .ConfigureAwait(false);
         }
+    }
+
+    private void RegisterAssetGridColumnTracking(DataGrid dataGrid, ExplorerTabState tab)
+    {
+        if (ColumnWidthDescriptor is null || _assetGridColumnSubscriptions.ContainsKey(dataGrid))
+        {
+            return;
+        }
+
+        var subscriptions = new List<ColumnWidthSubscription>(dataGrid.Columns.Count);
+        foreach (var column in dataGrid.Columns)
+        {
+            EventHandler handler = (_, _) =>
+            {
+                if (_columnWidthRestoreInProgress.Contains(dataGrid))
+                {
+                    return;
+                }
+
+                PersistGridColumnWidths(tab, dataGrid);
+                ScheduleMetadataSave(tab);
+            };
+
+            ColumnWidthDescriptor.AddValueChanged(column, handler);
+            subscriptions.Add(new ColumnWidthSubscription(column, handler));
+        }
+
+        _assetGridColumnSubscriptions[dataGrid] = subscriptions;
+    }
+
+    private void UnregisterAssetGridColumnTracking(DataGrid dataGrid)
+    {
+        if (ColumnWidthDescriptor is null || !_assetGridColumnSubscriptions.Remove(dataGrid, out var subscriptions))
+        {
+            return;
+        }
+
+        foreach (var subscription in subscriptions)
+        {
+            ColumnWidthDescriptor.RemoveValueChanged(subscription.Column, subscription.Handler);
+        }
+
+        _columnWidthRestoreInProgress.Remove(dataGrid);
+    }
+
+    private void ApplyStoredColumnWidthsToVisibleGrids(ExplorerTabState tab)
+    {
+        foreach (var dataGrid in FindDescendants<DataGrid>(this).Where(grid => ReferenceEquals(grid.DataContext, tab)))
+        {
+            RegisterAssetGridColumnTracking(dataGrid, tab);
+            ApplyStoredColumnWidths(dataGrid, tab);
+        }
+    }
+
+    private void ApplyStoredColumnWidths(DataGrid dataGrid, ExplorerTabState tab)
+    {
+        if (tab.MetadataDocument.ColumnWidths.Count == 0)
+        {
+            return;
+        }
+
+        _columnWidthRestoreInProgress.Add(dataGrid);
+
+        try
+        {
+            foreach (var column in dataGrid.Columns)
+            {
+                var key = GetColumnStorageKey(column);
+                if (key is null ||
+                    !tab.MetadataDocument.ColumnWidths.TryGetValue(key, out var width) ||
+                    width <= 0)
+                {
+                    continue;
+                }
+
+                column.Width = new DataGridLength(Math.Max(width, column.MinWidth), DataGridLengthUnitType.Pixel);
+            }
+        }
+        finally
+        {
+            _columnWidthRestoreInProgress.Remove(dataGrid);
+        }
+    }
+
+    private void PersistVisibleGridColumnWidths(ExplorerTabState tab)
+    {
+        foreach (var dataGrid in FindDescendants<DataGrid>(this).Where(grid => ReferenceEquals(grid.DataContext, tab)))
+        {
+            PersistGridColumnWidths(tab, dataGrid);
+        }
+    }
+
+    private void CaptureVisibleGridColumnWidths()
+    {
+        foreach (var dataGrid in FindDescendants<DataGrid>(this))
+        {
+            if (dataGrid.DataContext is ExplorerTabState tab)
+            {
+                PersistGridColumnWidths(tab, dataGrid);
+            }
+        }
+    }
+
+    private void PersistGridColumnWidths(ExplorerTabState tab, DataGrid dataGrid)
+    {
+        if (string.IsNullOrWhiteSpace(tab.CurrentDrivePath))
+        {
+            return;
+        }
+
+        var widths = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in dataGrid.Columns)
+        {
+            var key = GetColumnStorageKey(column);
+            if (key is null)
+            {
+                continue;
+            }
+
+            var width = column.Width.IsAbsolute ? column.Width.DisplayValue : column.ActualWidth;
+            if (double.IsNaN(width) || width <= 0)
+            {
+                continue;
+            }
+
+            widths[key] = Math.Round(width, 2);
+        }
+
+        if (widths.Count > 0)
+        {
+            tab.MetadataDocument.ColumnWidths = widths;
+        }
+    }
+
+    private void ScheduleMetadataSave(ExplorerTabState tab)
+    {
+        if (string.IsNullOrWhiteSpace(tab.CurrentDrivePath))
+        {
+            return;
+        }
+
+        CancelScheduledMetadataSave(tab);
+
+        var cancellation = new CancellationTokenSource();
+        _pendingMetadataSaveOperations[tab] = cancellation;
+        _ = PersistMetadataDeferredAsync(tab, cancellation);
+    }
+
+    private async Task PersistMetadataDeferredAsync(ExplorerTabState tab, CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.Delay(300, cancellation.Token);
+            await PersistMetadataAsync(tab);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (_pendingMetadataSaveOperations.TryGetValue(tab, out var current) && ReferenceEquals(current, cancellation))
+            {
+                _pendingMetadataSaveOperations.Remove(tab);
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelScheduledMetadataSave(ExplorerTabState tab)
+    {
+        if (_pendingMetadataSaveOperations.Remove(tab, out var cancellation))
+        {
+            cancellation.Cancel();
+            cancellation.Dispose();
+        }
+    }
+
+    private async Task FlushMetadataSaveAsync(ExplorerTabState tab)
+    {
+        CancelScheduledMetadataSave(tab);
+        await PersistMetadataAsync(tab);
     }
 
     private async Task TransferMetadataAsync(string sourcePath, string destinationPath, bool removeSource)
@@ -1285,7 +2002,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return true;
     }
 
-    private ContextMenu CreateGridContextMenu()
+    private ContextMenu CreateGridContextMenu(ExplorerTabState tab)
     {
         var menu = new ContextMenu();
         var newTabItem = new MenuItem { Header = "新しいタブ" };
@@ -1295,6 +2012,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var pasteItem = new MenuItem { Header = "ここに貼り付け", IsEnabled = HasPendingTransfer };
         pasteItem.Click += PasteIntoCurrentDirectory_Click;
         menu.Items.Add(pasteItem);
+
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreatePluginMenu(tab, null));
         return menu;
     }
 
@@ -1312,6 +2032,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         menu.Items.Add(pasteIntoItem);
 
         menu.Items.Add(new Separator());
+        menu.Items.Add(CreatePluginMenu(tab, asset));
+        menu.Items.Add(new Separator());
         menu.Items.Add(CreateAssetMenuItem("名前変更", asset, tab, RenameContextAsset_Click));
         menu.Items.Add(CreateAssetMenuItem("Explorer で表示", asset, tab, ShowInExplorer_Click));
         menu.Items.Add(CreateAssetMenuItem("パスをコピー", asset, tab, CopyPath_Click));
@@ -1324,6 +2046,125 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var item = new MenuItem { Header = header, Tag = asset, CommandParameter = tab };
         item.Click += handler;
         return item;
+    }
+
+    private MenuItem CreatePluginMenu(ExplorerTabState tab, AssetItem? asset)
+    {
+        var pluginMenu = new MenuItem { Header = "プラグイン" };
+        var invocationContext = CreatePluginInvocationContext(tab, asset);
+        var matchingCommands = _pluginCommands
+            .Where(command => command.Matches(invocationContext))
+            .OrderBy(command => command.PluginName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(command => command.CommandName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (matchingCommands.Length == 0)
+        {
+            pluginMenu.Items.Add(new MenuItem
+            {
+                Header = "利用できるプラグインはありません",
+                IsEnabled = false
+            });
+        }
+        else
+        {
+            foreach (var pluginGroup in matchingCommands.GroupBy(command => command.PluginId))
+            {
+                var first = pluginGroup.First();
+                var pluginItem = new MenuItem
+                {
+                    Header = first.PluginName,
+                    ToolTip = string.IsNullOrWhiteSpace(first.PluginDescription) ? null : first.PluginDescription
+                };
+
+                foreach (var command in pluginGroup)
+                {
+                    var commandItem = new MenuItem
+                    {
+                        Header = command.CommandName,
+                        Tag = new PluginMenuContext(tab, command, invocationContext),
+                        ToolTip = string.IsNullOrWhiteSpace(command.CommandDescription) ? null : command.CommandDescription
+                    };
+                    commandItem.Click += RunPluginCommand_Click;
+                    pluginItem.Items.Add(commandItem);
+                }
+
+                pluginMenu.Items.Add(pluginItem);
+            }
+        }
+
+        pluginMenu.Items.Add(new Separator());
+
+        var reloadItem = new MenuItem { Header = "プラグインを再読み込み" };
+        reloadItem.Click += ReloadPlugins_Click;
+        pluginMenu.Items.Add(reloadItem);
+
+        var openFolderItem = new MenuItem { Header = "プラグインフォルダーを開く" };
+        openFolderItem.Click += OpenPluginFolder_Click;
+        pluginMenu.Items.Add(openFolderItem);
+        return pluginMenu;
+    }
+
+    private PluginInvocationContext CreatePluginInvocationContext(ExplorerTabState tab, AssetItem? asset)
+    {
+        var selectedItems = new List<PluginSelectedItem>();
+        if (asset is not null)
+        {
+            selectedItems.Add(new PluginSelectedItem
+            {
+                FilePath = asset.FilePath,
+                Name = asset.Name,
+                Extension = asset.Extension,
+                AssetKind = ToPluginAssetKind(asset.Kind),
+                IsDirectory = asset.IsDirectory,
+                Tags = [.. asset.Tags],
+                Note = asset.Note,
+                IsFavorite = asset.IsFavorite
+            });
+        }
+
+        return new PluginInvocationContext
+        {
+            CurrentDirectory = tab.CurrentLocationPath,
+            CurrentDrivePath = tab.CurrentDrivePath,
+            SelectedItems = selectedItems
+        };
+    }
+
+    private async Task ExecutePluginCommandAsync(PluginMenuContext menuContext)
+    {
+        try
+        {
+            var result = await _pluginService.ExecuteAsync(menuContext.Command, menuContext.InvocationContext, CancellationToken.None);
+            AddLog($"プラグイン {menuContext.Command.PluginName} / {menuContext.Command.CommandName} を実行しました。");
+
+            if (menuContext.Command.RefreshAfterRun)
+            {
+                await RefreshAffectedTabsAsync([menuContext.InvocationContext.CurrentDirectory], menuContext.InvocationContext.PrimarySelectedPath);
+            }
+
+            AddLog($"プラグインコンテキスト: {result.ContextPath}");
+        }
+        catch (Exception exception)
+        {
+            ShowError("プラグインの実行に失敗しました。", exception);
+        }
+    }
+
+    private void ReloadPlugins(bool logSummary)
+    {
+        var catalog = _pluginService.LoadCatalog();
+        _pluginCommands = catalog.Commands;
+
+        if (logSummary)
+        {
+            AddLog($"プラグインを読み込みました。{_pluginCommands.Count} コマンド。");
+        }
+
+        foreach (var error in catalog.Errors)
+        {
+            AddLog($"プラグイン読み込みエラー: {error}");
+        }
     }
 
     private void WorkspacePane_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1413,29 +2254,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void NormalizeWorkspaceLayout()
     {
-        if (!Workspace0.HasTabs)
+        foreach (var pane in _workspacePanes)
         {
-            var nextWorkspace = _workspacePanes.Skip(1).FirstOrDefault(pane => pane.HasTabs);
-            if (nextWorkspace is not null)
+            pane.IsVisible = pane.HasTabs || pane.SlotIndex == 0;
+            if (!pane.HasTabs)
             {
-                MoveAllTabs(nextWorkspace, Workspace0);
+                pane.SelectedTab = null;
             }
-        }
-
-        if (!Workspace1.HasTabs && Workspace3.HasTabs && !Workspace2.HasTabs)
-        {
-            MoveAllTabs(Workspace3, Workspace1);
-        }
-
-        if (!Workspace2.HasTabs && Workspace3.HasTabs && !Workspace1.HasTabs)
-        {
-            MoveAllTabs(Workspace3, Workspace2);
-        }
-
-        foreach (var pane in _workspacePanes.Where(pane => pane.SlotIndex != 0 && !pane.HasTabs))
-        {
-            pane.IsVisible = false;
-            pane.SelectedTab = null;
         }
 
         Workspace0.IsVisible = true;
@@ -1481,24 +2306,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var hasRightColumn = Workspace1.HasTabs || Workspace3.HasTabs;
-        var hasBottomRow = Workspace2.HasTabs || Workspace3.HasTabs;
+        var columnHasTabs = Enumerable.Range(0, 3)
+            .Select(column => _workspacePanes.Any(pane => pane.HasTabs && GetPaneColumn(pane.SlotIndex) == column))
+            .ToArray();
+        var rowHasTabs = Enumerable.Range(0, 3)
+            .Select(row => _workspacePanes.Any(pane => pane.HasTabs && GetPaneRow(pane.SlotIndex) == row))
+            .ToArray();
 
-        WorkspaceCenterLeftColumn.Width = new GridLength(1, GridUnitType.Star);
-        WorkspaceCenterDividerColumn.Width = hasRightColumn ? new GridLength(1) : new GridLength(0);
-        WorkspaceCenterRightColumn.Width = hasRightColumn ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceColumn0.Width = columnHasTabs[0] ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceColumn1.Width = columnHasTabs[1] ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceColumn2.Width = columnHasTabs[2] ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceDividerColumn01.Width = HasVisibleColumnsAround(columnHasTabs, 0) ? new GridLength(1) : new GridLength(0);
+        WorkspaceDividerColumn12.Width = HasVisibleColumnsAround(columnHasTabs, 1) ? new GridLength(1) : new GridLength(0);
 
-        WorkspaceCenterTopRow.Height = new GridLength(1, GridUnitType.Star);
-        WorkspaceCenterDividerRow.Height = hasBottomRow ? new GridLength(1) : new GridLength(0);
-        WorkspaceCenterBottomRow.Height = hasBottomRow ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceRow0.Height = rowHasTabs[0] ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceRow1.Height = rowHasTabs[1] ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceRow2.Height = rowHasTabs[2] ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        WorkspaceDividerRow01.Height = HasVisibleRowsAround(rowHasTabs, 0) ? new GridLength(1) : new GridLength(0);
+        WorkspaceDividerRow12.Height = HasVisibleRowsAround(rowHasTabs, 1) ? new GridLength(1) : new GridLength(0);
 
-        WorkspaceVerticalDivider.Visibility = hasRightColumn ? Visibility.Visible : Visibility.Collapsed;
-        WorkspaceHorizontalDivider.Visibility = hasBottomRow ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceVerticalDivider01.Visibility = WorkspaceDividerColumn01.Width.Value > 0 ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceVerticalDivider12.Visibility = WorkspaceDividerColumn12.Width.Value > 0 ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceHorizontalDivider01.Visibility = WorkspaceDividerRow01.Height.Value > 0 ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceHorizontalDivider12.Visibility = WorkspaceDividerRow12.Height.Value > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        WorkspacePane0Host.Visibility = Workspace0.HasTabs ? Visibility.Visible : Visibility.Collapsed;
-        WorkspacePane1Host.Visibility = hasRightColumn && Workspace1.HasTabs ? Visibility.Visible : Visibility.Collapsed;
-        WorkspacePane2Host.Visibility = hasBottomRow && Workspace2.HasTabs ? Visibility.Visible : Visibility.Collapsed;
-        WorkspacePane3Host.Visibility = hasRightColumn && hasBottomRow && Workspace3.HasTabs ? Visibility.Visible : Visibility.Collapsed;
+        for (var index = 0; index < _workspacePanes.Length; index++)
+        {
+            GetWorkspaceHost(index).Visibility = _workspacePanes[index].HasTabs ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private void WorkspacePane_MouseDown(object sender, MouseButtonEventArgs e)
@@ -1571,9 +2406,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var data = new DataObject(typeof(ExplorerTabState), _dragTabCandidate);
-        DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
-        _dragTabCandidate = null;
-        _tabDragStartPoint = null;
+        try
+        {
+            DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
+        }
+        finally
+        {
+            ClearWorkspaceDropStates();
+            _dragTabCandidate = null;
+            _tabDragStartPoint = null;
+        }
     }
 
     private void WorkspacePane_DragEnter(object sender, DragEventArgs e)
@@ -1589,10 +2431,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void WorkspacePane_DragLeave(object sender, DragEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: WorkspacePaneState pane })
-        {
-            pane.ClearDropState();
-        }
+        ClearWorkspaceDropStates();
     }
 
     private void WorkspacePane_Drop(object sender, DragEventArgs e)
@@ -1627,6 +2466,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var dropZone = GetDropZone(e.GetPosition(element), element.ActualWidth, element.ActualHeight);
         pane.IsDropActive = true;
         pane.DropHintText = GetDropHintText(dropZone);
+        pane.DropZoneKey = dropZone.ToString();
+        IsWorkspaceDropOverlayVisible = true;
+        WorkspaceDropOverlayText = pane.DropHintText;
+        WorkspaceDropOverlayKey = pane.DropZoneKey;
         e.Effects = DragDropEffects.Move;
     }
 
@@ -1636,6 +2479,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             pane.ClearDropState();
         }
+
+        IsWorkspaceDropOverlayVisible = false;
+        WorkspaceDropOverlayText = string.Empty;
+        WorkspaceDropOverlayKey = string.Empty;
     }
 
     private static WorkspaceDropZone GetDropZone(Point position, double width, double height)
@@ -1647,28 +2494,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var normalizedX = position.X / width;
         var normalizedY = position.Y / height;
+        const double edgeThreshold = 0.24;
 
-        if (normalizedX <= 0.22)
+        var closest = new (WorkspaceDropZone Zone, double Distance)[]
         {
-            return WorkspaceDropZone.Left;
+            (WorkspaceDropZone.Left, normalizedX),
+            (WorkspaceDropZone.Right, 1d - normalizedX),
+            (WorkspaceDropZone.Top, normalizedY),
+            (WorkspaceDropZone.Bottom, 1d - normalizedY)
         }
+            .OrderBy(item => item.Distance)
+            .First();
 
-        if (normalizedX >= 0.78)
-        {
-            return WorkspaceDropZone.Right;
-        }
-
-        if (normalizedY <= 0.22)
-        {
-            return WorkspaceDropZone.Top;
-        }
-
-        if (normalizedY >= 0.78)
-        {
-            return WorkspaceDropZone.Bottom;
-        }
-
-        return WorkspaceDropZone.Center;
+        return closest.Distance <= edgeThreshold ? closest.Zone : WorkspaceDropZone.Center;
     }
 
     private static string GetDropHintText(WorkspaceDropZone zone)
@@ -1685,16 +2523,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private WorkspacePaneState? GetAdjacentWorkspace(WorkspacePaneState pane, WorkspaceDropZone zone)
     {
-        var destination = (pane.SlotIndex, zone) switch
+        var row = GetPaneRow(pane.SlotIndex);
+        var column = GetPaneColumn(pane.SlotIndex);
+        var destination = zone switch
         {
-            (0, WorkspaceDropZone.Right) => Workspace1,
-            (0, WorkspaceDropZone.Bottom) => Workspace2,
-            (1, WorkspaceDropZone.Left) => Workspace0,
-            (1, WorkspaceDropZone.Bottom) => Workspace3,
-            (2, WorkspaceDropZone.Top) => Workspace0,
-            (2, WorkspaceDropZone.Right) => Workspace3,
-            (3, WorkspaceDropZone.Left) => Workspace2,
-            (3, WorkspaceDropZone.Top) => Workspace1,
+            WorkspaceDropZone.Left when column > 0 => GetWorkspaceAt(row, column - 1),
+            WorkspaceDropZone.Right when column < 2 => GetWorkspaceAt(row, column + 1),
+            WorkspaceDropZone.Top when row > 0 => GetWorkspaceAt(row - 1, column),
+            WorkspaceDropZone.Bottom when row < 2 => GetWorkspaceAt(row + 1, column),
             _ => null
         };
 
@@ -1704,6 +2540,53 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         return destination;
+    }
+
+    private WorkspacePaneState? GetWorkspaceAt(int row, int column)
+    {
+        var slotIndex = row * 3 + column;
+        return slotIndex >= 0 && slotIndex < _workspacePanes.Length ? _workspacePanes[slotIndex] : null;
+    }
+
+    private static int GetPaneRow(int slotIndex)
+    {
+        return slotIndex / 3;
+    }
+
+    private static int GetPaneColumn(int slotIndex)
+    {
+        return slotIndex % 3;
+    }
+
+    private bool HasVisibleColumnsAround(IReadOnlyList<bool> visibility, int dividerIndex)
+    {
+        var hasLeft = visibility.Take(dividerIndex + 1).Any(isVisible => isVisible);
+        var hasRight = visibility.Skip(dividerIndex + 1).Any(isVisible => isVisible);
+        return hasLeft && hasRight;
+    }
+
+    private bool HasVisibleRowsAround(IReadOnlyList<bool> visibility, int dividerIndex)
+    {
+        var hasTop = visibility.Take(dividerIndex + 1).Any(isVisible => isVisible);
+        var hasBottom = visibility.Skip(dividerIndex + 1).Any(isVisible => isVisible);
+        return hasTop && hasBottom;
+    }
+
+    private ContentControl GetWorkspaceHost(int slotIndex)
+    {
+        return slotIndex switch
+        {
+            0 => WorkspacePane0Host,
+            1 => WorkspacePane1Host,
+            2 => WorkspacePane2Host,
+            3 => WorkspacePane3Host,
+            4 => WorkspacePane4Host,
+            5 => WorkspacePane5Host,
+            6 => WorkspacePane6Host,
+            7 => WorkspacePane7Host,
+            8 => WorkspacePane8Host,
+            _ => throw new ArgumentOutOfRangeException(nameof(slotIndex))
+        };
     }
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
@@ -1845,6 +2728,56 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return null;
     }
 
+    private static IEnumerable<T> FindDescendants<T>(DependencyObject? start) where T : DependencyObject
+    {
+        if (start is null)
+        {
+            yield break;
+        }
+
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(start); index++)
+        {
+            var child = VisualTreeHelper.GetChild(start, index);
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var nested in FindDescendants<T>(child))
+            {
+                yield return nested;
+            }
+        }
+    }
+
+    private static string? GetColumnStorageKey(DataGridColumn column)
+    {
+        return column.Header as string;
+    }
+
+    private static string ToPluginAssetKind(AssetKind kind)
+    {
+        return kind switch
+        {
+            AssetKind.Folder => "folder",
+            AssetKind.Image => "image",
+            AssetKind.Video => "video",
+            AssetKind.Text => "text",
+            AssetKind.Pdf => "pdf",
+            _ => "other"
+        };
+    }
+
+    private string? PromptForText(string title, string prompt, string initialValue)
+    {
+        var dialog = new TextPromptWindow(title, prompt, initialValue)
+        {
+            Owner = this
+        };
+
+        return dialog.ShowDialog() == true ? dialog.ResponseText : null;
+    }
+
     private void AddLog(string message)
     {
         _activityLog.Insert(0, $"{DateTime.Now:HH:mm:ss}  {message}");
@@ -1852,6 +2785,80 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _activityLog.RemoveAt(_activityLog.Count - 1);
         }
+    }
+
+    public async Task<LayoutSelfTestResult> RunLayoutSelfTestAsync()
+    {
+        if (SelectedTab is null)
+        {
+            throw new InvalidOperationException("SelectedTab is not initialized.");
+        }
+
+        var testPath = GetLayoutSelfTestPath();
+        if (!string.IsNullOrWhiteSpace(testPath) &&
+            !string.Equals(SelectedTab.CurrentLocationPath, testPath, StringComparison.OrdinalIgnoreCase))
+        {
+            await NavigateToPathAsync(SelectedTab, testPath);
+        }
+
+        var secondTab = await CreateAndOpenTabAsync(SelectedTab.CurrentLocationPath);
+        MoveTabToWorkspace(secondTab, Workspace3);
+        ClearWorkspaceDropStates();
+
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        await Task.Delay(300);
+        UpdateLayout();
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+
+        var visibleGrids = FindDescendants<DataGrid>(this)
+            .Where(grid => grid.Visibility == Visibility.Visible && grid.ActualHeight > 80 && grid.ActualWidth > 100)
+            .Select(grid =>
+            {
+                var scrollViewer = FindDescendant<ScrollViewer>(grid);
+                var visibleVerticalScrollBars = FindDescendants<ScrollBar>(grid)
+                    .Count(scrollBar => scrollBar.Visibility == Visibility.Visible && scrollBar.Orientation == Orientation.Vertical);
+                return new LayoutSelfTestGridInfo
+                {
+                    Height = Math.Round(grid.ActualHeight, 1),
+                    Width = Math.Round(grid.ActualWidth, 1),
+                    VerticalScrollVisibility = scrollViewer?.ComputedVerticalScrollBarVisibility.ToString() ?? "Unknown",
+                    ScrollableHeight = scrollViewer is null ? 0 : Math.Round(scrollViewer.ScrollableHeight, 1),
+                    VisibleVerticalScrollBarCount = visibleVerticalScrollBars
+                };
+            })
+            .ToList();
+
+        return new LayoutSelfTestResult
+        {
+            VisibleGridCount = visibleGrids.Count,
+            Row0Height = Math.Round(WorkspaceRow0.ActualHeight, 1),
+            Row1Height = Math.Round(WorkspaceRow1.ActualHeight, 1),
+            Row2Height = Math.Round(WorkspaceRow2.ActualHeight, 1),
+            Host0Visibility = WorkspacePane0Host.Visibility.ToString(),
+            Host3Visibility = WorkspacePane3Host.Visibility.ToString(),
+            OverlayVisible = IsWorkspaceDropOverlayVisible,
+            Grids = visibleGrids
+        };
+    }
+
+    private static string GetLayoutSelfTestPath()
+    {
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (!string.IsNullOrWhiteSpace(windowsDirectory))
+        {
+            var system32 = Path.Combine(windowsDirectory, "System32");
+            if (Directory.Exists(system32))
+            {
+                return system32;
+            }
+
+            if (Directory.Exists(windowsDirectory))
+            {
+                return windowsDirectory;
+            }
+        }
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
     private void ShowError(string message, Exception exception)
@@ -1898,24 +2905,122 @@ internal enum WorkspaceDropZone
     Bottom
 }
 
-public sealed class SubtractDoubleConverter : IValueConverter
+internal sealed class TextPromptWindow : Window
 {
-    public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+    private readonly TextBox _textBox;
+
+    public TextPromptWindow(string title, string prompt, string initialValue)
     {
-        var source = value is double number ? number : 0d;
-        var subtract = 0d;
-        if (parameter is not null)
+        Title = title;
+        Width = 420;
+        Height = 176;
+        MinWidth = 420;
+        MaxWidth = 420;
+        ResizeMode = ResizeMode.NoResize;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        WindowStyle = WindowStyle.ToolWindow;
+        Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#131920"));
+        Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F2F5F7"));
+        ShowInTaskbar = false;
+
+        var root = new Grid
         {
-            _ = double.TryParse(parameter.ToString(), out subtract);
-        }
+            Margin = new Thickness(16)
+        };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        return Math.Max(0d, source - subtract);
+        root.Children.Add(new TextBlock
+        {
+            Text = prompt,
+            FontSize = 13,
+            Margin = new Thickness(0, 0, 0, 10),
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        _textBox = new TextBox
+        {
+            Text = initialValue,
+            Margin = new Thickness(0, 0, 0, 14)
+        };
+        Grid.SetRow(_textBox, 1);
+        root.Children.Add(_textBox);
+
+        var buttons = new Grid();
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetRow(buttons, 3);
+
+        var cancelButton = new Button
+        {
+            Content = "キャンセル",
+            MinWidth = 88,
+            Margin = new Thickness(0, 0, 8, 0),
+            IsCancel = true
+        };
+        Grid.SetColumn(cancelButton, 1);
+        buttons.Children.Add(cancelButton);
+
+        var okButton = new Button
+        {
+            Content = "OK",
+            MinWidth = 88,
+            IsDefault = true
+        };
+        okButton.Click += (_, _) =>
+        {
+            DialogResult = true;
+            Close();
+        };
+        Grid.SetColumn(okButton, 2);
+        buttons.Children.Add(okButton);
+
+        root.Children.Add(buttons);
+        Content = root;
+
+        Loaded += (_, _) =>
+        {
+            _textBox.Focus();
+            _textBox.SelectAll();
+        };
     }
 
-    public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
-    {
-        throw new NotSupportedException();
-    }
+    public string ResponseText => _textBox.Text.Trim();
+}
+
+internal sealed class ColumnWidthSubscription(DataGridColumn column, EventHandler handler)
+{
+    public DataGridColumn Column { get; } = column;
+    public EventHandler Handler { get; } = handler;
+}
+
+internal sealed record PluginMenuContext(
+    ExplorerTabState Tab,
+    PluginCommandDefinition Command,
+    PluginInvocationContext InvocationContext);
+
+public sealed class LayoutSelfTestResult
+{
+    public int VisibleGridCount { get; init; }
+    public double Row0Height { get; init; }
+    public double Row1Height { get; init; }
+    public double Row2Height { get; init; }
+    public string Host0Visibility { get; init; } = string.Empty;
+    public string Host3Visibility { get; init; } = string.Empty;
+    public bool OverlayVisible { get; init; }
+    public List<LayoutSelfTestGridInfo> Grids { get; init; } = [];
+}
+
+public sealed class LayoutSelfTestGridInfo
+{
+    public double Height { get; init; }
+    public double Width { get; init; }
+    public string VerticalScrollVisibility { get; init; } = string.Empty;
+    public double ScrollableHeight { get; init; }
+    public int VisibleVerticalScrollBarCount { get; init; }
 }
 
 

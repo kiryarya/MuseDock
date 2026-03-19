@@ -11,6 +11,7 @@ public sealed class WorkspacePaneState : INotifyPropertyChanged
     private bool _isVisible;
     private bool _isDropActive;
     private string _dropHintText = string.Empty;
+    private string _dropZoneKey = string.Empty;
 
     public WorkspacePaneState(int slotIndex)
     {
@@ -54,6 +55,12 @@ public sealed class WorkspacePaneState : INotifyPropertyChanged
         set => SetField(ref _dropHintText, value);
     }
 
+    public string DropZoneKey
+    {
+        get => _dropZoneKey;
+        set => SetField(ref _dropZoneKey, value);
+    }
+
     public bool HasTabs => Tabs.Count > 0;
 
     public bool HasSelection => SelectedTab is not null;
@@ -62,6 +69,7 @@ public sealed class WorkspacePaneState : INotifyPropertyChanged
     {
         IsDropActive = false;
         DropHintText = string.Empty;
+        DropZoneKey = string.Empty;
     }
 
     private void Tabs_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

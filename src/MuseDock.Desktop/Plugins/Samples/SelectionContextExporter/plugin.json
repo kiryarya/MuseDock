@@ -1,0 +1,31 @@
+{
+  "id": "sample.selection-context-exporter",
+  "name": "サンプル: 選択情報エクスポート",
+  "version": "1.0.0",
+  "description": "MuseDock から渡される実行コンテキストを JSON として保存するサンプルです。",
+  "author": "MuseDock",
+  "commands": [
+    {
+      "id": "export-selection-context",
+      "name": "選択情報を JSON で保存",
+      "description": "選択中ファイルの情報を %TEMP% に書き出します。",
+      "runner": "powershell",
+      "entry": "run.ps1",
+      "arguments": [
+        "-ContextPath",
+        "{contextPath}"
+      ],
+      "requiresSelection": true,
+      "waitForExit": true,
+      "refreshAfterRun": false,
+      "assetKinds": [
+        "folder",
+        "image",
+        "video",
+        "text",
+        "pdf",
+        "other"
+      ]
+    }
+  ]
+}
