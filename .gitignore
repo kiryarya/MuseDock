@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+.dotnet-home/
+.nuget/
+dist/
+.codex/
+.planning/
+tmp-*.png
+a04b14e8-113b-432d-99a1-098112bcb2fe.png
